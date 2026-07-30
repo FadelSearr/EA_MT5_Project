@@ -5,11 +5,12 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Antigravity"
 #property link      "https://www.mql5.com"
-#property version   "1.10"
+#property version   "1.20"
 
 #include "Include/MarketDetector.mqh"
 #include "Include/TrendModule.mqh"
 #include "Include/MeanRevModule.mqh"
+#include "Include/BreakoutModule.mqh"
 #include "Include/RiskManager.mqh"
 #include "Include/PositionMgr.mqh"
 #include "Include/Logger.mqh"
@@ -24,13 +25,15 @@ input ulong  InpMagicNumber    = 12345;  // Magic Number
 input double InpATRSLMult      = 0.5;    // Stop Loss ATR Mult (Trend)
 input double InpATRTPMult      = 1.5;    // Take Profit ATR Mult (Trend)
 input int    InpDonchianPeriod = 20;     // Donchian Period (MeanRev)
+input int    InpConsolBars    = 20;     // Konsolidasi Bars (Breakout)
 
-CMarketDetector *g_detector;
-CTrendModule    *g_trend_module;
-CMeanRevModule  *g_mean_rev;
-CRiskManager    *g_risk_mgr;
-CPositionMgr    *g_pos_mgr;
-CTrade           g_trade;
+CMarketDetector  *g_detector;
+CTrendModule     *g_trend_module;
+CMeanRevModule   *g_mean_rev;
+CBreakoutModule  *g_breakout;
+CRiskManager     *g_risk_mgr;
+CPositionMgr     *g_pos_mgr;
+CTrade            g_trade;
 
 int g_atr_handle;
 
@@ -56,6 +59,13 @@ int OnInit()
       CLogger::Error("Failed to init MeanRevModule");
       return INIT_FAILED;
    }
+
+   g_breakout = new CBreakoutModule();
+   if(!g_breakout.Init(Symbol(), InpConsolBars))
+   {
+      CLogger::Error("Failed to init BreakoutModule");
+      return INIT_FAILED;
+   }
    
    g_risk_mgr = new CRiskManager(InpRiskPercent, InpMaxDrawdown, InpMaxPositions);
    
@@ -75,6 +85,7 @@ void OnDeinit(const int reason)
    if(g_detector)    delete g_detector;
    if(g_trend_module) delete g_trend_module;
    if(g_mean_rev)    delete g_mean_rev;
+   if(g_breakout)    delete g_breakout;
    if(g_risk_mgr)    delete g_risk_mgr;
    if(g_pos_mgr)     delete g_pos_mgr;
    if(g_atr_handle != INVALID_HANDLE) IndicatorRelease(g_atr_handle);
@@ -150,6 +161,30 @@ void OnTick()
          double lot    = g_risk_mgr.CalculateLotSize(Symbol(), sl_pts);
          g_trade.Sell(lot, Symbol(), bid, mr_sl, mr_tp);
          CLogger::Info("MeanRev SELL Executed");
+      }
+   }
+   else if(mode == MODE_BREAKOUT)
+   {
+      double bo_sl = 0, bo_tp = 0;
+      int signal = g_breakout.CheckSignal(bo_sl, bo_tp);
+
+      if(signal == 1) // Bullish breakout
+      {
+         double ask    = SymbolInfoDouble(Symbol(), SYMBOL_ASK);
+         double sl_pts = (ask - bo_sl) / SymbolInfoDouble(Symbol(), SYMBOL_POINT);
+         if(sl_pts <= 0) sl_pts = 10; // ponytail: minimal fallback
+         double lot    = g_risk_mgr.CalculateLotSize(Symbol(), sl_pts);
+         g_trade.Buy(lot, Symbol(), ask, bo_sl, bo_tp);
+         CLogger::Info("Breakout BUY Executed");
+      }
+      else if(signal == -1) // Bearish breakout
+      {
+         double bid    = SymbolInfoDouble(Symbol(), SYMBOL_BID);
+         double sl_pts = (bo_sl - bid) / SymbolInfoDouble(Symbol(), SYMBOL_POINT);
+         if(sl_pts <= 0) sl_pts = 10; // ponytail: minimal fallback
+         double lot    = g_risk_mgr.CalculateLotSize(Symbol(), sl_pts);
+         g_trade.Sell(lot, Symbol(), bid, bo_sl, bo_tp);
+         CLogger::Info("Breakout SELL Executed");
       }
    }
 }
