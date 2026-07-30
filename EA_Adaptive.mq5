@@ -5,10 +5,11 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Antigravity"
 #property link      "https://www.mql5.com"
-#property version   "1.00"
+#property version   "1.10"
 
 #include "Include/MarketDetector.mqh"
 #include "Include/TrendModule.mqh"
+#include "Include/MeanRevModule.mqh"
 #include "Include/RiskManager.mqh"
 #include "Include/PositionMgr.mqh"
 #include "Include/Logger.mqh"
@@ -20,11 +21,13 @@ input double InpRiskPercent    = 1.0;    // Risk per Trade (%)
 input double InpMaxDrawdown    = 3.0;    // Max Daily Drawdown (%)
 input int    InpMaxPositions   = 3;      // Max Open Positions
 input ulong  InpMagicNumber    = 12345;  // Magic Number
-input double InpATRSLMult      = 0.5;    // Stop Loss (ATR Multiplier)
-input double InpATRTPMult      = 1.5;    // Take Profit (ATR Multiplier)
+input double InpATRSLMult      = 0.5;    // Stop Loss ATR Mult (Trend)
+input double InpATRTPMult      = 1.5;    // Take Profit ATR Mult (Trend)
+input int    InpDonchianPeriod = 20;     // Donchian Period (MeanRev)
 
 CMarketDetector *g_detector;
 CTrendModule    *g_trend_module;
+CMeanRevModule  *g_mean_rev;
 CRiskManager    *g_risk_mgr;
 CPositionMgr    *g_pos_mgr;
 CTrade           g_trade;
@@ -46,6 +49,13 @@ int OnInit()
       CLogger::Error("Failed to init TrendModule");
       return INIT_FAILED;
    }
+
+   g_mean_rev = new CMeanRevModule();
+   if(!g_mean_rev.Init(Symbol(), InpDonchianPeriod))
+   {
+      CLogger::Error("Failed to init MeanRevModule");
+      return INIT_FAILED;
+   }
    
    g_risk_mgr = new CRiskManager(InpRiskPercent, InpMaxDrawdown, InpMaxPositions);
    
@@ -62,10 +72,11 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
-   if(g_detector) delete g_detector;
+   if(g_detector)    delete g_detector;
    if(g_trend_module) delete g_trend_module;
-   if(g_risk_mgr) delete g_risk_mgr;
-   if(g_pos_mgr) delete g_pos_mgr;
+   if(g_mean_rev)    delete g_mean_rev;
+   if(g_risk_mgr)    delete g_risk_mgr;
+   if(g_pos_mgr)     delete g_pos_mgr;
    if(g_atr_handle != INVALID_HANDLE) IndicatorRelease(g_atr_handle);
    
    CLogger::Info("EA_Adaptive Deinitialized");
@@ -117,6 +128,28 @@ void OnTick()
          
          g_trade.Sell(lot, Symbol(), bid, sl, tp);
          CLogger::Info("SELL Executed");
+      }
+   }
+   else if(mode == MODE_SIDEWAYS)
+   {
+      double mr_sl = 0, mr_tp = 0;
+      int signal = g_mean_rev.CheckSignal(atr_val, mr_sl, mr_tp);
+
+      if(signal == 1) // BUY
+      {
+         double sl_pts = (SymbolInfoDouble(Symbol(), SYMBOL_ASK) - mr_sl) / SymbolInfoDouble(Symbol(), SYMBOL_POINT);
+         double lot    = g_risk_mgr.CalculateLotSize(Symbol(), sl_pts);
+         double ask    = SymbolInfoDouble(Symbol(), SYMBOL_ASK);
+         g_trade.Buy(lot, Symbol(), ask, mr_sl, mr_tp);
+         CLogger::Info("MeanRev BUY Executed");
+      }
+      else if(signal == -1) // SELL
+      {
+         double bid    = SymbolInfoDouble(Symbol(), SYMBOL_BID);
+         double sl_pts = (mr_sl - bid) / SymbolInfoDouble(Symbol(), SYMBOL_POINT);
+         double lot    = g_risk_mgr.CalculateLotSize(Symbol(), sl_pts);
+         g_trade.Sell(lot, Symbol(), bid, mr_sl, mr_tp);
+         CLogger::Info("MeanRev SELL Executed");
       }
    }
 }
