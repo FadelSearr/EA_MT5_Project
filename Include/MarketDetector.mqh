@@ -76,19 +76,24 @@ public:
       
       // ADX Rule
       if(adx[0] > 28) trend_score += 3;
-      else if(adx[0] < 20) { sideways_score += 2; breakout_score += 2; }
+      else if(adx[0] >= 15 && adx[0] < 25) sideways_score += 3;
+      else if(adx[0] < 15) breakout_score += 3; // Extreme low ADX = compression
       
       // ATR Ratio Rule
       if(atr_ratio > 1.3) trend_score += 2;
-      else if(atr_ratio < 0.7) { sideways_score += 2; breakout_score += 2; }
+      else if(atr_ratio >= 0.6 && atr_ratio < 1.0) sideways_score += 2;
+      else if(atr_ratio < 0.6) breakout_score += 2; // Extreme low volatility
       
       // EMA Slope Rule (Threshold ~20 points over 10 bars)
       if(ema_slope > 20) trend_score += 2;
-      else if(ema_slope < 10) { sideways_score += 1; breakout_score += 1; }
+      else if(ema_slope < 10) { 
+         sideways_score += 2; 
+         breakout_score += 2; // Flat EMA applies to both
+      }
       
       if(trend_score >= 5) return MODE_TREND;
-      if(sideways_score >= 5 && breakout_score < 5) return MODE_SIDEWAYS;
-      if(breakout_score >= 5 && sideways_score < 5) return MODE_BREAKOUT;
+      if(breakout_score >= 5) return MODE_BREAKOUT; // Prioritize breakout prep
+      if(sideways_score >= 5) return MODE_SIDEWAYS;
       
       return MODE_UNCERTAIN;
    }
